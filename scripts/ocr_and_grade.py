@@ -108,7 +108,8 @@ def process_detected_plate(crop, file_name):
     
     # Skalowanie i przetwarzanie w jednym etapie
     h, w = crop.shape[:2]
-    crop_scaled = cv2.resize(crop, (w * 4, h * 4), interpolation=cv2.INTER_CUBIC)
+    scale_factor = 3
+    crop_scaled = cv2.resize(crop, (w * scale_factor, h * scale_factor), interpolation=cv2.INTER_CUBIC)
     gray = cv2.cvtColor(crop_scaled, cv2.COLOR_BGR2GRAY)
     denoised = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
     blurred = cv2.medianBlur(denoised, 5)
