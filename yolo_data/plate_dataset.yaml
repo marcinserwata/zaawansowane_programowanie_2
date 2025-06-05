@@ -1,0 +1,5 @@
+train: ../yolo_data/images/train
+val:   ../yolo_data/images/val
+
+nc: 1
+names: ["plate"]
