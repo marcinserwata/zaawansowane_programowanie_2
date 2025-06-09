@@ -99,31 +99,142 @@ def calculate_iou(box1, box2):
     
     return intersection / union
 
+def detect_plate_angle(crop):
+    """
+    Detects the rotation angle of the license plate using edge detection and Hough lines.
+    Returns the angle in degrees needed to make the plate horizontal.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 70, apertureSize=3)  # TUNE: Canny thresholds (50, 150) - lower values detect more edges
+    
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=30, maxLineGap=10)  # TUNE: threshold=50 (line detection sensitivity), minLineLength=30 (minimum line length), maxLineGap=10 (max gap in line)
+    
+    if lines is None:
+        return 0
+    
+    angles = []
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+        # Normalize angle to [-45, 45] range
+        if angle > 45:
+            angle -= 90
+        elif angle < -45:
+            angle += 90
+        angles.append(angle)
+    
+    if not angles:
+        return 0
+    
+    # Return median angle for robustness
+    return np.median(angles)
+
+def rotate_image(image, angle):
+    """
+    Rotates the image by the given angle around its center.
+    """
+    if abs(angle) < 0.5:  # TUNE: Skip rotation threshold (0.5 degrees) - increase to ignore smaller rotations
+        return image
+    
+    h, w = image.shape[:2]
+    center = (w // 2, h // 2)
+    
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, rotation_matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    
+    return rotated
+
+def correct_perspective(crop):
+    """
+    Corrects perspective distortion by finding the license plate contour
+    and applying perspective transformation to make it rectangular.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    
+    # Apply edge detection
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)  # TUNE: Canny thresholds (50, 150) - adjust for better edge detection
+    
+    # Find contours
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return crop
+    
+    # Find the largest contour (assumed to be the plate)
+    largest_contour = max(contours, key=cv2.contourArea)
+    
+    # Approximate contour to a polygon
+    epsilon = 0.02 * cv2.arcLength(largest_contour, True)  # TUNE: epsilon factor (0.02) - lower values = more precise approximation
+    approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+    
+    # If we found a quadrilateral, apply perspective correction
+    if len(approx) == 4:
+        # Order points: top-left, top-right, bottom-right, bottom-left
+        pts = approx.reshape(4, 2).astype(np.float32)
+        
+        # Sort points to get consistent ordering
+        rect = np.zeros((4, 2), dtype=np.float32)
+        
+        # Top-left point has smallest sum, bottom-right has largest sum
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]  # top-left
+        rect[2] = pts[np.argmax(s)]  # bottom-right
+        
+        # Top-right has smallest diff, bottom-left has largest diff
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)]  # top-right
+        rect[3] = pts[np.argmax(diff)]  # bottom-left
+        
+        # Calculate dimensions for the corrected rectangle
+        width_top = np.linalg.norm(rect[1] - rect[0])
+        width_bottom = np.linalg.norm(rect[2] - rect[3])
+        width = int(max(width_top, width_bottom))
+        
+        height_left = np.linalg.norm(rect[3] - rect[0])
+        height_right = np.linalg.norm(rect[2] - rect[1])
+        height = int(max(height_left, height_right))
+        
+        # Define destination points for rectangle
+        dst = np.array([
+            [0, 0],
+            [width - 1, 0],
+            [width - 1, height - 1],
+            [0, height - 1]
+        ], dtype=np.float32)
+        
+        # Apply perspective transformation
+        matrix = cv2.getPerspectiveTransform(rect, dst)
+        corrected = cv2.warpPerspective(crop, matrix, (width, height))
+        
+        return corrected
+    
+    return crop
+
 def process_detected_plate(crop, file_name):
     if crop.size == 0:
-        return ""
+        return ""    
     
-    # Zapisz wycinek oryginalny (do weryfikacji)
-    cv2.imwrite(str(CROPS_DIR / f"{Path(file_name).stem}_cropped.jpg"), crop)
+    # Step 1: Correct perspective distortion
+    crop = correct_perspective(crop)    
     
-    # Skalowanie i przetwarzanie w jednym etapie
+    # Step 2: Detect and correct plate angle
+    angle = detect_plate_angle(crop)
+    if abs(angle) > 0.5:
+        crop = rotate_image(crop, angle)        
+    
+    # Step 3: Scale image for better OCR
     h, w = crop.shape[:2]
-    scale_factor = 3
-    crop_scaled = cv2.resize(crop, (w * scale_factor, h * scale_factor), interpolation=cv2.INTER_CUBIC)
-    gray = cv2.cvtColor(crop_scaled, cv2.COLOR_BGR2GRAY)
-    denoised = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
-    blurred = cv2.medianBlur(denoised, 5)
+    scale_factor = 3  # TUNE: Scale factor (3) - higher values = larger text for OCR
+    crop = cv2.resize(crop, (w * scale_factor, h * scale_factor), interpolation=cv2.INTER_CUBIC)    
     
-    # Progowanie adaptacyjne z morfologią
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 301, 25)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    # Step 4: Convert to grayscale and blur
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.medianBlur(gray, 3)  # TUNE: kernel size (3) - larger values = more blur, must be odd
+    cv2.imwrite(str(CROPS_DIR / f"{Path(file_name).stem}_final.jpg"), blurred)
     
-    cv2.imwrite(str(CROPS_DIR / f"processed_{Path(file_name).stem}.jpg"), thresh)
-    
-    # OCR
+    # Apply OCR to the processed crop
     config = "--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    text = pytesseract.image_to_string(thresh, config=config)
+    text = pytesseract.image_to_string(blurred, config=config)
     return text.replace(" ", "").replace("\n", "").upper()
 
 def detection_and_ocr():    
