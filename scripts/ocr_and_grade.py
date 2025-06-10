@@ -17,16 +17,27 @@ CROPS_DIR       = PROJECT_ROOT / "results" / "crops"
 OCR_RESULTS     = PROJECT_ROOT / "results" / "ocr_results.txt"
 ANNOTATIONS_XML = PROJECT_ROOT / "data" / "annotations.xml"
 
-def calculate_final_grade(accuracy_percent: float, time_for_100: float) -> float:
-    """Oblicza końcową ocenę na podstawie dokładności i czasu przetwarzania"""
-    if accuracy_percent < 60 or time_for_100 > 60:
-        return 2.0    
-    
+def calculate_final_grade(accuracy_percent: float, processing_time_sec: float) -> float:
+    """
+    Calculates the final grade based on license plate OCR accuracy and pro
+    cessing time.
+    Parameters:
+    - accuracy_percent: OCR accuracy as a percentage (0–100)
+    - processing_time_sec: total time to process 100 images in seconds
+    Returns:
+    - Grade on a scale from 2.0 to 5.0 (rounded to the nearest 0.5)
+    """
+    # Check minimum requirements
+    if accuracy_percent < 60 or processing_time_sec > 60:
+        return 2.0
+    # Normalize accuracy: 60% → 0.0, 100% → 1.0
     accuracy_norm = (accuracy_percent - 60) / 40
-    time_norm     = (60 - time_for_100) / 50    
-    
-    score         = 0.7 * accuracy_norm + 0.3 * time_norm
-    grade         = 2.0 + 3.0 * score
+    # Normalize time: 60s → 0.0, 10s → 1.0
+    time_norm = (60 - processing_time_sec) / 50
+    # Compute weighted score
+    score = 0.7 * accuracy_norm + 0.3 * time_norm
+    grade = 2.0 + 3.0 * score
+    # Round to the nearest 0.5
     return round(grade * 2) / 2
 
 def load_annotations(xml_path: Path) -> dict:
