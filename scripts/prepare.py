@@ -4,11 +4,6 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 import shutil
 
-"""
-Skrypt przygotowuje dane do trenowania modelu YOLO do detekcji tablic rejestracyjnych.
-Zakłada, że mamy plik XML z adnotacjami i obrazy w katalogu `data/images/`.
-"""
-
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 IMAGES_DIR = os.path.join(DATA_DIR, "images")

@@ -1,10 +1,6 @@
 import os
 from ultralytics import YOLO
 
-"""
-Skrypt trenuje model YOLO11 do detekcji tablic rejestracyjnych
-"""
-
 SCRIPT_DIR    = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT  = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 DATA_YAML    = os.path.join(PROJECT_ROOT, "yolo_data", "plate_dataset.yaml")
